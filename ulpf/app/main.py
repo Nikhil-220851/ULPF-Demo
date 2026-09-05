@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import health, process, plugins
+from app.api.routes import ai
 
 app = FastAPI(title="ULPF API", description="Universal Log Pre-processing Framework")
 
@@ -23,3 +24,5 @@ async def health_check():
 app.include_router(health.router)
 app.include_router(process.router)
 app.include_router(plugins.router)
+app.include_router(ai.router)
+

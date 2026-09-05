@@ -19,6 +19,9 @@ class ProcessingResult(BaseModel):
     # Populated for UNKNOWN events — enables frontend plugin creation flow
     structure: Optional[Dict[str, Any]] = None
     candidate_mappings: Optional[Dict[str, Any]] = None
+    # AI assistance metadata
+    ai_used: bool = False
+    ai_status: str = "not_applicable"  # not_applicable | success | unavailable | skipped
 
 class BatchProcessingResult(BaseModel):
     total: int

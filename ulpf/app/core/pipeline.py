@@ -15,6 +15,11 @@ from app.trust.validator import validate_event
 from app.trust.provenance import track_provenance
 from app.trust.quarantine import handle_error
 
+from app.config import AI_MAPPING_ENABLED, AI_MAPPING_THRESHOLD
+from app.services.ai.groq_provider import groq_provider
+from app.services.ai.merger import merge_mappings
+from app.services.ai.groq_provider import VALID_TARGET_FIELDS
+
 
 def process_event(event: InputEvent) -> ProcessingResult:
     raw_payload = event.raw_payload
@@ -30,6 +35,8 @@ def process_event(event: InputEvent) -> ProcessingResult:
         provenance = {}
         structure = None
         mapping_result = {}
+        ai_used = False
+        ai_status = "not_applicable"
         
         parser_name = None
         if detected_format != "UNKNOWN":
@@ -53,18 +60,45 @@ def process_event(event: InputEvent) -> ProcessingResult:
             # 2b. Unknown Log Processing
             structure = analyze_structure(raw_payload)
             
-            # 3b. Semantic Mapping
+            # 3b. Local Semantic Mapping
             mapping_result = map_semantics(structure)
             normalized_event = mapping_result.get("normalized_event", UniversalEvent())
             unmapped_fields = mapping_result.get("unmapped_fields", {})
-            confidence = mapping_result.get("confidence", {
-                "overall": 0.0,
-                "format": 0.0,
-                "mapping": 0.0,
-                "human_review_required": True
-            })
+            local_confidence = mapping_result.get("confidence", {})
+            confidence = local_confidence
             parsed_data = structure.get("tokens", {})
-            
+
+            local_candidates = mapping_result.get("candidate_mappings", {})
+            overall_local = local_confidence.get("overall", 0.0)
+
+            # 3c. AI-Assisted Mapping (only when local confidence is low)
+            if AI_MAPPING_ENABLED and overall_local < AI_MAPPING_THRESHOLD:
+                ai_response = groq_provider.suggest_mappings(
+                    raw_log=raw_payload,
+                    structure=structure,
+                    candidate_mappings=local_candidates,
+                    universal_schema=sorted(VALID_TARGET_FIELDS),
+                )
+                if ai_response is not None:
+                    merged = merge_mappings(local_candidates, ai_response)
+                    mapping_result["candidate_mappings"] = merged
+                    ai_used = True
+                    ai_status = "success"
+                    # Recalculate human_review flag based on merged confidence
+                    merged_scores = [
+                        v["confidence"] for v in merged.values() if v.get("mapped_to")
+                    ]
+                    if merged_scores:
+                        avg = sum(merged_scores) / len(merged_scores)
+                        confidence = {**confidence, "overall": avg, "mapping": avg}
+                else:
+                    ai_used = False
+                    ai_status = "unavailable"
+            elif AI_MAPPING_ENABLED and overall_local >= AI_MAPPING_THRESHOLD:
+                ai_status = "skipped"   # local confidence was good enough
+            else:
+                ai_status = "not_applicable"   # AI disabled in config
+
         # 4. Provenance / Traceability
         provenance = track_provenance(parsed_data, normalized_event)
         
@@ -87,7 +121,9 @@ def process_event(event: InputEvent) -> ProcessingResult:
             confidence=confidence,
             provenance=provenance,
             structure=event_structure,
-            candidate_mappings=event_candidate_mappings
+            candidate_mappings=event_candidate_mappings,
+            ai_used=ai_used,
+            ai_status=ai_status,
         )
         
     except Exception as e:
@@ -95,3 +131,4 @@ def process_event(event: InputEvent) -> ProcessingResult:
         err_res.source_file = event.source_file
         err_res.source_file_index = event.source_file_index
         return err_res
+

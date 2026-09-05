@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CheckCircle, AlertTriangle, XCircle, Info, Copy, Puzzle, CheckSquare } from 'lucide-react';
+import { CheckCircle, AlertTriangle, XCircle, Info, Copy, Puzzle, CheckSquare, Sparkles, Zap } from 'lucide-react';
 import { confirmPlugin } from '../api/client';
 
 const SummaryCard = ({ label, value, subtext, status }) => (
@@ -329,6 +329,16 @@ const ResultView = ({ result, onPluginConfirmed }) => {
             <h3 className="text-lg font-semibold text-indigo-900 flex items-center gap-2">
               <Info className="w-5 h-5 text-indigo-600" />
               Adaptive Intelligence: Structure Analysis
+              {result.ai_used && (
+                <span className="ml-auto flex items-center gap-1.5 text-xs font-semibold bg-violet-100 text-violet-700 border border-violet-200 px-2.5 py-1 rounded-full">
+                  <Sparkles className="w-3.5 h-3.5" /> AI Assisted
+                </span>
+              )}
+              {result.ai_status === 'unavailable' && (
+                <span className="ml-auto flex items-center gap-1.5 text-xs font-semibold bg-orange-100 text-orange-700 border border-orange-200 px-2.5 py-1 rounded-full">
+                  <Zap className="w-3.5 h-3.5" /> AI Unavailable
+                </span>
+              )}
             </h3>
           </div>
           <div className="p-6">
@@ -349,13 +359,49 @@ const ResultView = ({ result, onPluginConfirmed }) => {
                 </thead>
                 <tbody>
                   {Object.entries(result.candidate_mappings || {}).map(([key, info], i) => (
-                    <tr key={i} className="border-b border-slate-100 last:border-0">
-                      <td className="py-2 text-slate-600">{key}</td>
-                      <td className="py-2">{info.value}</td>
-                      <td className="py-2 text-indigo-600 font-semibold">
-                        {info.mapped_to ? `→ ${info.mapped_to}` : <span className="text-slate-400 italic">unmapped</span>}
-                      </td>
-                    </tr>
+                    <React.Fragment key={i}>
+                      <tr className="border-b border-slate-100 last:border-0">
+                        <td className="py-2 text-slate-600">{key}</td>
+                        <td className="py-2">{info.value}</td>
+                        <td className="py-2">
+                          <div className="flex items-center gap-2">
+                            {info.mapped_to
+                              ? <span className="text-indigo-600 font-semibold">→ {info.mapped_to}</span>
+                              : <span className="text-slate-400 italic">unmapped</span>}
+                            {info.source === 'ai' && (
+                              <span className="text-xs bg-violet-100 text-violet-700 border border-violet-200 px-1.5 py-0.5 rounded-full font-semibold">AI</span>
+                            )}
+                            {info.source === 'ai+local' && (
+                              <span className="text-xs bg-green-100 text-green-700 border border-green-200 px-1.5 py-0.5 rounded-full font-semibold">AI+Local</span>
+                            )}
+                            {info.source === 'local' && (
+                              <span className="text-xs bg-slate-100 text-slate-500 border border-slate-200 px-1.5 py-0.5 rounded-full">Local</span>
+                            )}
+                          </div>
+                          {info.ai_reason && (
+                            <div className="text-xs text-slate-400 mt-0.5 italic">{info.ai_reason}</div>
+                          )}
+                        </td>
+                      </tr>
+                      {/* Conflict candidates: render sub-rows for human to choose */}
+                      {info.conflict_candidates && info.conflict_candidates.map((cand, ci) => (
+                        <tr key={`conflict-${i}-${ci}`} className="bg-amber-50 border-b border-amber-100 last:border-0">
+                          <td className="pl-6 py-1 text-xs text-amber-700 font-mono">↳ conflict #{ci + 1}</td>
+                          <td className="py-1 text-xs text-slate-500">{info.value}</td>
+                          <td className="py-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-amber-700 font-semibold text-xs">→ {cand.target_field}</span>
+                              <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold border ${
+                                cand.source === 'ai'
+                                  ? 'bg-violet-100 text-violet-700 border-violet-200'
+                                  : 'bg-slate-100 text-slate-500 border-slate-200'
+                              }`}>{cand.source === 'ai' ? 'AI' : 'Local'}</span>
+                              <span className="text-xs text-slate-400">{(cand.confidence * 100).toFixed(0)}%</span>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>
