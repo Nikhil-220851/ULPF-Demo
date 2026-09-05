@@ -22,12 +22,15 @@ const ConfirmMappingPanel = ({ result, onPluginConfirmed }) => {
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState('');
 
-  // Build signature and field_mappings from provenance / unmapped_fields
-  const structure = result._structure || {};
+  // Build signature and field_mappings from structure / candidate_mappings
+  const structure = result.structure || {};
   const delimiter = structure.delimiter || '|';
-  const fieldCount = structure.field_count || 0;
-  const fieldTypes = structure.field_types || [];
-  const candidateMappings = result._candidate_mappings || {};
+  const fieldCount = structure.fields || 0;
+  const formatType = structure.format_type || 'delimited';
+  const lineCount = structure.line_count || 1;
+  const prefixPattern = structure.prefix_pattern || null;
+  const fieldTypes = structure.data_types || [];
+  const candidateMappings = result.candidate_mappings || {};
 
   const fieldMappings = {};
   let idx = 0;
@@ -42,7 +45,14 @@ const ConfirmMappingPanel = ({ result, onPluginConfirmed }) => {
     setConfirming(true);
     setError('');
     try {
-      const signature = { delimiter, field_count: fieldCount, field_types: fieldTypes };
+      const signature = { 
+        format_type: formatType,
+        delimiter, 
+        field_count: fieldCount, 
+        line_count: lineCount,
+        prefix_pattern: prefixPattern,
+        field_types: fieldTypes 
+      };
       const res = await confirmPlugin(pluginName, signature, fieldMappings);
       if (res.status === 'success') {
         setConfirmed(true);
@@ -87,8 +97,10 @@ const ConfirmMappingPanel = ({ result, onPluginConfirmed }) => {
       </div>
 
       <div className="mb-4 text-sm text-slate-600 space-y-1">
-        <div><span className="font-semibold">Delimiter:</span> <code className="bg-white px-2 py-0.5 rounded border border-slate-200">{delimiter === '\t' ? '\\t (tab)' : delimiter}</code></div>
+        <div><span className="font-semibold">Format Type:</span> <code className="bg-white px-2 py-0.5 rounded border border-slate-200">{formatType}</code></div>
+        <div><span className="font-semibold">Delimiter:</span> <code className="bg-white px-2 py-0.5 rounded border border-slate-200">{delimiter === null ? 'None (Positional/Custom)' : delimiter === '\t' ? '\\t (tab)' : delimiter}</code></div>
         <div><span className="font-semibold">Fields:</span> {fieldCount}</div>
+        {formatType === 'multiline_bracketed' && <div><span className="font-semibold">Lines:</span> {lineCount}</div>}
       </div>
 
       <div className="mb-4">
@@ -336,11 +348,13 @@ const ResultView = ({ result, onPluginConfirmed }) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {Object.entries(result.provenance || {}).map(([key, prov], i) => (
+                  {Object.entries(result.candidate_mappings || {}).map(([key, info], i) => (
                     <tr key={i} className="border-b border-slate-100 last:border-0">
-                      <td className="py-2 text-slate-600">{prov.original_field}</td>
-                      <td className="py-2">{prov.original_value}</td>
-                      <td className="py-2 text-indigo-600 font-semibold">→ {key}</td>
+                      <td className="py-2 text-slate-600">{key}</td>
+                      <td className="py-2">{info.value}</td>
+                      <td className="py-2 text-indigo-600 font-semibold">
+                        {info.mapped_to ? `→ ${info.mapped_to}` : <span className="text-slate-400 italic">unmapped</span>}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

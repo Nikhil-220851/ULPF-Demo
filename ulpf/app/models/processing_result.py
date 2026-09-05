@@ -16,8 +16,12 @@ class ProcessingResult(BaseModel):
     validation: Dict[str, Any]
     confidence: Dict[str, Any]
     provenance: Dict[str, Any]
+    # Populated for UNKNOWN events — enables frontend plugin creation flow
+    structure: Optional[Dict[str, Any]] = None
+    candidate_mappings: Optional[Dict[str, Any]] = None
 
 class BatchProcessingResult(BaseModel):
     total: int
     processed: int
     results: List[ProcessingResult]
+

@@ -50,13 +50,38 @@ class PluginManager:
         """
         Matches a raw event / its structure against stored plugins.
         """
+        format_type = structure.get("format_type", "delimited")
         delim = structure.get("delimiter")
         field_count = structure.get("fields", 0)
+        line_count = structure.get("line_count", 1)
         
         for plugin_id, plugin in self.plugins.items():
             sig = plugin.get("signature", {})
-            if sig.get("delimiter") == delim and sig.get("field_count") == field_count:
-                return plugin
+            
+            sig_format_type = sig.get("format_type", "delimited")
+            
+            # Format types must match
+            if sig_format_type != format_type:
+                continue
+                
+            # For delimited logs, check delimiter and field count
+            if format_type == "delimited":
+                if sig.get("delimiter") == delim and sig.get("field_count") == field_count:
+                    return plugin
+            
+            # For multiline logs, check prefix pattern (if any), line count, and field count
+            elif format_type == "multiline_bracketed":
+                import re
+                prefix_pattern = sig.get("prefix_pattern")
+                if prefix_pattern:
+                    try:
+                        if not re.search(prefix_pattern, raw_payload):
+                            continue
+                    except:
+                        pass # Invalid regex in plugin
+                        
+                if sig.get("line_count") == line_count and sig.get("field_count") == field_count:
+                    return plugin
                 
         return None
 

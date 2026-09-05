@@ -6,7 +6,7 @@ from app.models.processing_result import ProcessingResult
 from app.models.universal_event import UniversalEvent
 
 from app.known_logs.detector import detect_format
-from app.known_logs.normalizer import normalize_event
+from app.core.normalizer import normalize_event
 from app.unknown_logs.structure_analyzer import analyze_structure
 from app.unknown_logs.semantic_mapper import map_semantics
 from app.unknown_logs.confidence import calculate_confidence
@@ -28,6 +28,8 @@ def process_event(event: InputEvent) -> ProcessingResult:
         unmapped_fields = {}
         confidence = {}
         provenance = {}
+        structure = None
+        mapping_result = {}
         
         parser_name = None
         if detected_format != "UNKNOWN":
@@ -69,6 +71,10 @@ def process_event(event: InputEvent) -> ProcessingResult:
         # 5. Validation
         validation_result = validate_event(normalized_event)
         
+        # Only populate structure and candidate_mappings for UNKNOWN events
+        event_structure = structure if detected_format == "UNKNOWN" else None
+        event_candidate_mappings = mapping_result.get("candidate_mappings") if detected_format == "UNKNOWN" else None
+        
         return ProcessingResult(
             raw_event=raw_payload,
             source_file=event.source_file,
@@ -79,7 +85,9 @@ def process_event(event: InputEvent) -> ProcessingResult:
             unmapped_fields=unmapped_fields,
             validation=validation_result,
             confidence=confidence,
-            provenance=provenance
+            provenance=provenance,
+            structure=event_structure,
+            candidate_mappings=event_candidate_mappings
         )
         
     except Exception as e:

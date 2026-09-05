@@ -1,0 +1,19 @@
+{
+  "plugin_id": "test_plugin",
+  "name": "Test Plugin",
+  "signature": {
+    "format_type": "multiline_bracketed",
+    "delimiter": null,
+    "field_count": 6,
+    "line_count": 6,
+    "prefix_pattern": "^<\\d{8}:\\d{6}>"
+  },
+  "field_mappings": {
+    "field_1": "event.timestamp",
+    "FROM_IP": "source.ip",
+    "TO_IP": "destination.ip",
+    "TO_PORT": "destination.port",
+    "USER": "user.name",
+    "ACTION": "event.action"
+  }
+}
