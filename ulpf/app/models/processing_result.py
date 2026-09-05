@@ -19,6 +19,8 @@ class ProcessingResult(BaseModel):
     # Populated for UNKNOWN events — enables frontend plugin creation flow
     structure: Optional[Dict[str, Any]] = None
     candidate_mappings: Optional[Dict[str, Any]] = None
+    ocsf: Optional[Dict[str, Any]] = None
+    ocsf_validation: Optional[Dict[str, Any]] = None
 
 class BatchProcessingResult(BaseModel):
     total: int

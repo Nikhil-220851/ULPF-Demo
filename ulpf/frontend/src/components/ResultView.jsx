@@ -156,7 +156,7 @@ const ConfirmMappingPanel = ({ result, onPluginConfirmed }) => {
 };
 
 const ResultView = ({ result, onPluginConfirmed }) => {
-  const [activeTab, setActiveTab] = useState('normalized');
+  const [activeTab, setActiveTab] = useState('universal');
 
   if (!result || result.status === 'not implemented') {
     return (
@@ -206,28 +206,107 @@ const ResultView = ({ result, onPluginConfirmed }) => {
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="flex border-b border-slate-200 overflow-x-auto">
-          {['normalized', 'unmapped', 'raw', 'traceability'].map(tab => (
-            <button
-              key={tab}
-              className={`px-5 py-3 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${activeTab === tab ? 'border-primary-500 text-primary-600 bg-primary-50' : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
-              onClick={() => setActiveTab(tab)}
-            >
-              {tab === 'normalized' ? 'Universal Event' : tab === 'unmapped' ? 'Unmapped Fields' : tab === 'raw' ? 'Raw Event' : 'Traceability'}
-            </button>
-          ))}
+          {['universal', 'internal', 'unmapped', 'raw', 'traceability'].map(tab => {
+            const labels = {
+              universal:    'Universal Event',
+              internal:     'Normalized Event',
+              unmapped:     'Unmapped Fields',
+              raw:          'Raw Event',
+              traceability: 'Traceability',
+            };
+            return (
+              <button
+                key={tab}
+                className={`px-5 py-3 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
+                  activeTab === tab
+                    ? tab === 'universal'
+                      ? 'border-emerald-500 text-emerald-700 bg-emerald-50'
+                      : 'border-primary-500 text-primary-600 bg-primary-50'
+                    : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+                }`}
+                onClick={() => setActiveTab(tab)}
+              >
+                {tab === 'universal' ? (
+                  <span className="flex items-center gap-1.5">
+                    {labels[tab]}
+                    <span className="text-xs font-semibold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">OCSF</span>
+                  </span>
+                ) : labels[tab]}
+              </button>
+            );
+          })}
         </div>
 
         <div className="p-6">
-          {activeTab === 'normalized' && (
+          {/* ── UNIVERSAL EVENT (OCSF) ── */}
+          {activeTab === 'universal' && (
             <div>
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold text-slate-800">Normalized Fields</h3>
+              <div className="flex justify-between items-center mb-3">
+                <div className="flex items-center gap-3">
+                  <h3 className="text-lg font-semibold text-slate-800">Universal Event</h3>
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">OCSF v{result.ocsf?.metadata?.version || '1.3.0'}</span>
+                  <span className="text-xs font-semibold text-slate-500">{result.ocsf?.class_name || 'Network Activity'}</span>
+                  {result.ocsf_validation?.status === 'VALID' ? (
+                    <span className="flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700">
+                      <CheckCircle className="w-3 h-3" /> VALID
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+                      <AlertTriangle className="w-3 h-3" /> INVALID
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={() => navigator.clipboard.writeText(JSON.stringify(result.ocsf || {}, null, 2))}
+                  className="flex items-center space-x-1 text-sm text-slate-500 hover:text-primary-600"
+                >
+                  <Copy className="w-4 h-4" /><span>Copy JSON</span>
+                </button>
+              </div>
+
+              <div className="mb-3 flex items-center gap-6 text-xs text-slate-500 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2">
+                <span><span className="font-semibold text-emerald-700">Standard:</span> Open Cybersecurity Schema Framework</span>
+                <span><span className="font-semibold text-emerald-700">Class UID:</span> {result.ocsf?.class_uid ?? 4001}</span>
+                <span><span className="font-semibold text-emerald-700">Category:</span> {result.ocsf?.category_name || 'Network Activity'}</span>
+              </div>
+
+              {result.ocsf_validation?.status === 'INVALID' && (
+                <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+                  <span className="font-bold">OCSF Validation Errors:</span>
+                  <ul className="list-disc pl-5 mt-1">
+                    {result.ocsf_validation.errors?.map((err, i) => <li key={i}>{err}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              <div className="bg-slate-900 text-emerald-300 rounded-lg border border-slate-700 p-4 font-mono text-sm overflow-x-auto">
+                <pre>{JSON.stringify(result.ocsf || {}, null, 2)}</pre>
+              </div>
+
+              <p className="mt-3 text-xs text-slate-400 italic">
+                This is the final standardized Universal Event — produced by the OCSF Mapper from the internal normalized representation. Downstream SIEM, Data Lake, and AI systems consume this.
+              </p>
+            </div>
+          )}
+
+          {/* ── NORMALIZED EVENT (Internal) ── */}
+          {activeTab === 'internal' && (
+            <div>
+              <div className="flex justify-between items-center mb-3">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-800">Normalized Event</h3>
+                  <p className="text-xs text-slate-400 mt-0.5">Internal normalized representation — ULPF Universal Semantic Model</p>
+                </div>
                 <button
                   onClick={() => navigator.clipboard.writeText(JSON.stringify(result.normalized_event || {}, null, 2))}
                   className="flex items-center space-x-1 text-sm text-slate-500 hover:text-primary-600"
                 >
                   <Copy className="w-4 h-4" /><span>Copy JSON</span>
                 </button>
+              </div>
+              <div className="mb-3 flex items-center gap-2 text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-4 py-2">
+                <Info className="w-3.5 h-3.5 flex-shrink-0" />
+                Intermediate representation produced by <code className="font-mono bg-white border border-slate-200 rounded px-1">normalize_event()</code>. Format-agnostic; feeds the OCSF Mapper.
               </div>
               <div className="bg-slate-50 rounded-lg border border-slate-200 p-4 font-mono text-sm overflow-x-auto">
                 <pre>{JSON.stringify(result.normalized_event || {}, null, 2)}</pre>

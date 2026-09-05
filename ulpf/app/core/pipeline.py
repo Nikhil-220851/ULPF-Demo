@@ -15,6 +15,9 @@ from app.trust.validator import validate_event
 from app.trust.provenance import track_provenance
 from app.trust.quarantine import handle_error
 
+from app.core.ocsf.mapper import map_to_ocsf
+from app.core.ocsf.validator import validate_ocsf
+
 
 def process_event(event: InputEvent) -> ProcessingResult:
     raw_payload = event.raw_payload
@@ -75,6 +78,14 @@ def process_event(event: InputEvent) -> ProcessingResult:
         event_structure = structure if detected_format == "UNKNOWN" else None
         event_candidate_mappings = mapping_result.get("candidate_mappings") if detected_format == "UNKNOWN" else None
         
+        # 6. OCSF Mapping and Validation
+        ocsf_event, final_unmapped_fields = map_to_ocsf(normalized_event, unmapped_fields)
+        ocsf_validation_result = validate_ocsf(ocsf_event)
+
+        # Always return a full result with ocsf_validation populated.
+        # OCSF validation failures are surfaced via ocsf_validation.status == "INVALID".
+        # This preserves the raw event, provenance and all context (lossless).
+        # Only unrecoverable exceptions (caught below) use handle_error / quarantine.
         return ProcessingResult(
             raw_event=raw_payload,
             source_file=event.source_file,
@@ -82,12 +93,14 @@ def process_event(event: InputEvent) -> ProcessingResult:
             detected_format=detected_format,
             parser=parser_name,
             normalized_event=normalized_event,
-            unmapped_fields=unmapped_fields,
+            unmapped_fields=final_unmapped_fields,
             validation=validation_result,
             confidence=confidence,
             provenance=provenance,
             structure=event_structure,
-            candidate_mappings=event_candidate_mappings
+            candidate_mappings=event_candidate_mappings,
+            ocsf=ocsf_event,
+            ocsf_validation=ocsf_validation_result
         )
         
     except Exception as e:
