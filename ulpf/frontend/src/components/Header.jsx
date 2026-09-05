@@ -2,7 +2,7 @@ import React from 'react';
 import { Shield } from 'lucide-react';
 import SystemStatus from './SystemStatus';
 
-const Header = () => {
+const Header = ({ activeView, onNav = () => {} }) => {
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -18,9 +18,10 @@ const Header = () => {
           </div>
           
           <nav className="hidden md:flex space-x-8">
-            <a href="#" className="text-primary-600 font-semibold border-b-2 border-primary-600 px-1 py-5">Dashboard</a>
-            <a href="#" className="text-slate-500 hover:text-slate-800 font-medium px-1 py-5 transition-colors">Process Log</a>
-            <a href="#" className="text-slate-500 hover:text-slate-800 font-medium px-1 py-5 transition-colors">History</a>
+            <button onClick={() => onNav('dashboard')} className={`font-semibold px-1 py-5 border-b-2 transition-colors ${activeView === 'dashboard' ? 'text-primary-600 border-primary-600' : 'text-slate-500 hover:text-slate-800 border-transparent'}`}>Dashboard</button>
+            <button onClick={() => onNav('process')} className={`font-semibold px-1 py-5 border-b-2 transition-colors ${activeView === 'process' ? 'text-primary-600 border-primary-600' : 'text-slate-500 hover:text-slate-800 border-transparent'}`}>Process Log</button>
+            <button onClick={() => onNav('plugins')} className={`font-semibold px-1 py-5 border-b-2 transition-colors ${activeView === 'plugins' ? 'text-purple-600 border-purple-600' : 'text-slate-500 hover:text-slate-800 border-transparent'}`}>Plugin Registry</button>
+            <button onClick={() => onNav('history')} className={`font-semibold px-1 py-5 border-b-2 transition-colors ${activeView === 'history' ? 'text-primary-600 border-primary-600' : 'text-slate-500 hover:text-slate-800 border-transparent'}`}>History</button>
           </nav>
 
           <div className="flex items-center">
