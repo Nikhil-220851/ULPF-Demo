@@ -19,6 +19,8 @@ from app.config import AI_MAPPING_ENABLED, AI_MAPPING_THRESHOLD
 from app.services.ai.groq_provider import groq_provider
 from app.services.ai.merger import merge_mappings
 from app.services.ai.groq_provider import VALID_TARGET_FIELDS
+from app.core.ocsf.mapper import map_to_ocsf
+from app.core.ocsf.validator import validate_ocsf
 
 
 def process_event(event: InputEvent) -> ProcessingResult:
@@ -109,6 +111,14 @@ def process_event(event: InputEvent) -> ProcessingResult:
         event_structure = structure if detected_format == "UNKNOWN" else None
         event_candidate_mappings = mapping_result.get("candidate_mappings") if detected_format == "UNKNOWN" else None
         
+        # 6. OCSF Mapping and Validation
+        ocsf_event, final_unmapped_fields = map_to_ocsf(normalized_event, unmapped_fields)
+        ocsf_validation_result = validate_ocsf(ocsf_event)
+
+        # Always return a full result with ocsf_validation populated.
+        # OCSF validation failures are surfaced via ocsf_validation.status == "INVALID".
+        # This preserves the raw event, provenance and all context (lossless).
+        # Only unrecoverable exceptions (caught below) use handle_error / quarantine.
         return ProcessingResult(
             raw_event=raw_payload,
             source_file=event.source_file,
@@ -116,7 +126,7 @@ def process_event(event: InputEvent) -> ProcessingResult:
             detected_format=detected_format,
             parser=parser_name,
             normalized_event=normalized_event,
-            unmapped_fields=unmapped_fields,
+            unmapped_fields=final_unmapped_fields,
             validation=validation_result,
             confidence=confidence,
             provenance=provenance,
@@ -124,11 +134,12 @@ def process_event(event: InputEvent) -> ProcessingResult:
             candidate_mappings=event_candidate_mappings,
             ai_used=ai_used,
             ai_status=ai_status,
+            ocsf=ocsf_event,
+            ocsf_validation=ocsf_validation_result
         )
         
     except Exception as e:
         err_res = handle_error(raw_payload, str(e), traceback.format_exc())
         err_res.source_file = event.source_file
         err_res.source_file_index = event.source_file_index
-        return err_res
 

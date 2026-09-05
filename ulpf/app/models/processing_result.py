@@ -22,9 +22,11 @@ class ProcessingResult(BaseModel):
     # AI assistance metadata
     ai_used: bool = False
     ai_status: str = "not_applicable"  # not_applicable | success | unavailable | skipped
+    # OCSF Schema mapping and validation
+    ocsf: Optional[Dict[str, Any]] = None
+    ocsf_validation: Optional[Dict[str, Any]] = None
 
 class BatchProcessingResult(BaseModel):
     total: int
     processed: int
     results: List[ProcessingResult]
-
