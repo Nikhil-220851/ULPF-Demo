@@ -1,0 +1,38 @@
+{
+  "plugin_id": "custom_plugin_2373ad37",
+  "name": "Custom Plugin",
+  "version": "1.0",
+  "signature": {
+    "format_type": "delimited",
+    "delimiter": " ",
+    "field_count": 10,
+    "line_count": 1,
+    "prefix_pattern": null,
+    "field_types": [
+      "UNKNOWN",
+      "TIMESTAMP",
+      "UNKNOWN",
+      "IP",
+      "IP",
+      "PORT",
+      "PORT",
+      "PROTOCOL",
+      "ACTION",
+      "UNKNOWN"
+    ]
+  },
+  "field_mappings": {
+    "field_1": "device.hostname",
+    "field_2": "event.timestamp",
+    "field_4": "source.ip",
+    "field_5": "destination.ip",
+    "field_6": "destination.port",
+    "field_7": "source.port",
+    "field_8": "network.transport",
+    "field_9": "event.action",
+    "field_10": "user.name"
+  },
+  "created_by": "human-confirmed",
+  "confidence": 1.0,
+  "enabled": true
+}

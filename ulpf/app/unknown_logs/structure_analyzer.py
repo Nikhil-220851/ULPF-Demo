@@ -17,10 +17,28 @@ _QUOTED_PATTERN = re.compile(r'^"(.+)"$')
 def _classify_token(value: str) -> str:
     """Classify a single token string into a semantic type."""
     v = value.strip()
+
+    # Bracket-wrapped composite endpoint: [IP:PORT] or [IP#PORT]
+    if v.startswith("[") and v.endswith("]"):
+        inner = v[1:-1].strip()
+        sep = "#" if "#" in inner else (":" if ":" in inner else None)
+        if sep:
+            parts = inner.split(sep, 1)
+            if _IP_PATTERN.match(parts[0].strip()):
+                return "COMPOSITE_ENDPOINT"
+
+    # Plain composite endpoint: IP#PORT
     if '#' in v:
         parts = v.split('#', 1)
         if _IP_PATTERN.match(parts[0].strip()):
             return "COMPOSITE_ENDPOINT"
+
+    # Plain composite endpoint: IP:PORT (colon separator, numeric port)
+    if ':' in v:
+        parts = v.split(':', 1)
+        if _IP_PATTERN.match(parts[0].strip()) and parts[1].strip().isdigit():
+            return "COMPOSITE_ENDPOINT"
+
     if _IP_PATTERN.match(v):
         return "IP"
     if re.match(r'^\d+$', v) and 1 <= int(v) <= 65535:

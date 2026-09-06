@@ -176,16 +176,29 @@ def _is_ip(val: str) -> bool:
     return bool(isinstance(val, str) and IPV4_REGEX.match(val.strip()))
 
 def _parse_composite_endpoint(val: Any) -> Tuple[Optional[str], Optional[int]]:
-    """Extract (ip, port) from composite values like 192.168.44.27#51542 or 10.20.30.40:443."""
+    """Extract (ip, port) from composite values.
+
+    Handles:
+      - [192.168.1.1:55120]  (square brackets, colon separator)
+      - [192.168.1.1#55120]  (square brackets, hash separator)
+      - 192.168.1.1:55120    (plain, colon separator)
+      - 192.168.1.1#55120    (plain, hash separator)
+    Returns (ip_str, port_int) or (ip_str, None) or (None, None).
+    """
     if not isinstance(val, str):
         return None, None
     s = val.strip()
+    # Strip surrounding square brackets, e.g. [192.168.1.1:55120]
+    if s.startswith("[") and s.endswith("]"):
+        s = s[1:-1].strip()
     delimiter = "#" if "#" in s else (":" if ":" in s else None)
     if delimiter:
         parts = s.split(delimiter, 1)
-        if len(parts) == 2 and _is_ip(parts[0]) and parts[1].isdigit():
-            return parts[0], int(parts[1])
-    elif _is_ip(s):
+        if len(parts) == 2 and _is_ip(parts[0].strip()) and parts[1].strip().isdigit():
+            port = int(parts[1].strip())
+            if 1 <= port <= 65535:
+                return parts[0].strip(), port
+    if _is_ip(s):
         return s, None
     return None, None
 
@@ -249,8 +262,18 @@ def normalize_event(parsed_data: Dict[str, Any]) -> Tuple[UniversalEvent, Dict[s
             unmapped_fields[orig_key] = val
             return
 
-        # Check composite IP#PORT or IP:PORT
-        if category in ("source", "destination") and subfield in ("ip", "endpoint", "port"):
+        # Check composite IP#PORT, IP:PORT, or [IP:PORT] / [IP#PORT]
+        # Trigger on any source/destination field if the value looks like a compound endpoint
+        _looks_composite = (
+            isinstance(val, str) and (
+                (val.strip().startswith("[") and val.strip().endswith("]"))
+                or "#" in val
+                or (":" in val and any(c.isdigit() for c in val.split(":", 1)[-1][:6]))
+            )
+        )
+        if category in ("source", "destination") and (
+            subfield in ("ip", "endpoint", "port") or _looks_composite
+        ):
             ip_part, port_part = _parse_composite_endpoint(val)
             if ip_part:
                 normalized_data[category]["ip"] = ip_part
