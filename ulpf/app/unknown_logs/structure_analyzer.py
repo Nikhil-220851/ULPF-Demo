@@ -17,11 +17,15 @@ _QUOTED_PATTERN = re.compile(r'^"(.+)"$')
 def _classify_token(value: str) -> str:
     """Classify a single token string into a semantic type."""
     v = value.strip()
+    if '#' in v:
+        parts = v.split('#', 1)
+        if _IP_PATTERN.match(parts[0].strip()):
+            return "COMPOSITE_ENDPOINT"
     if _IP_PATTERN.match(v):
         return "IP"
     if re.match(r'^\d+$', v) and 1 <= int(v) <= 65535:
         return "PORT"
-    if _TIMESTAMP_PATTERN.match(v):
+    if _TIMESTAMP_PATTERN.match(v) or re.match(r'^\d{4}[-/]\d{2}[-/]\d{2}(?:[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?)?$', v):
         return "TIMESTAMP"
     if v.startswith('<') and v.endswith('>'):
         inner = v[1:-1]
@@ -31,6 +35,8 @@ def _classify_token(value: str) -> str:
                      "LOGIN_FAIL", "LOGIN_SUCCESS", "FILE_ACCESS",
                      "ALLOWED", "DENIED", "BLOCKED"):
         return "ACTION"
+    if v.upper() in ("TCP", "UDP", "ICMP", "HTTP", "HTTPS", "DNS", "TLS", "SSH"):
+        return "PROTOCOL"
     if _QUOTED_PATTERN.match(v):
         return "MESSAGE"
     return "UNKNOWN"
@@ -115,7 +121,7 @@ def analyze_structure(raw_payload: str) -> dict:
     if len(lines) > 1:
         return _analyze_multiline(lines)
 
-    # Single-line: try common delimiters
+    # Single-line: try common delimiters (checking multi-character ones first)
     raw = raw_payload.strip()
     structure = {
         "format_type": "delimited",
@@ -127,15 +133,17 @@ def analyze_structure(raw_payload: str) -> dict:
         "prefix_pattern": None,
     }
 
-    for delim in ['|', '\t', ';']:
+    delimiters_to_check = [' :: ', '::', ' || ', '||', ' | ', '|', '\t', ';', ' - ', ',']
+    for delim in delimiters_to_check:
         if delim in raw:
-            structure["delimiter"] = delim
+            structure["delimiter"] = delim.strip() if delim.strip() else delim
             break
 
     if not structure["delimiter"]:
         structure["delimiter"] = " "  # fallback to space
 
-    parts = [p.strip() for p in raw.split(structure["delimiter"]) if p.strip()]
+    delim_pattern = structure["delimiter"]
+    parts = [p.strip() for p in raw.split(delim_pattern) if p.strip()]
     structure["fields"] = len(parts)
 
     for i, part in enumerate(parts):

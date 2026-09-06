@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { CheckCircle, AlertTriangle, XCircle, Info, Copy, Puzzle, CheckSquare, Sparkles, Zap } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { CheckCircle, AlertTriangle, XCircle, Info, Copy, Puzzle, CheckSquare, Sparkles, Zap, RotateCcw } from 'lucide-react';
 import { confirmPlugin } from '../api/client';
 
 const SummaryCard = ({ label, value, subtext, status }) => (
@@ -16,13 +16,51 @@ const SummaryCard = ({ label, value, subtext, status }) => (
   </div>
 );
 
+// Canonical list of target fields from ULPF UniversalEvent schema
+const CANONICAL_TARGET_FIELDS = [
+  'event.timestamp',
+  'event.action',
+  'event.outcome',
+  'event.message',
+  'event.application',
+  'event.category',
+  'event.type',
+  'event.id',
+  'source.ip',
+  'source.port',
+  'source.hostname',
+  'source.domain',
+  'source.mac',
+  'source.user',
+  'destination.ip',
+  'destination.port',
+  'destination.hostname',
+  'destination.domain',
+  'destination.mac',
+  'network.protocol',
+  'network.direction',
+  'network.bytes',
+  'network.packets',
+  'network.transport',
+  'user.name',
+  'user.id',
+  'user.domain',
+  'user.email',
+  'device.hostname',
+  'device.ip',
+  'device.mac',
+  'device.type',
+  'device.os',
+  'device.vendor',
+  'severity',
+];
+
 const ConfirmMappingPanel = ({ result, onPluginConfirmed }) => {
   const [pluginName, setPluginName] = useState('Custom Plugin');
   const [confirming, setConfirming] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState('');
 
-  // Build signature and field_mappings from structure / candidate_mappings
   const structure = result.structure || {};
   const delimiter = structure.delimiter || '|';
   const fieldCount = structure.fields || 0;
@@ -32,14 +70,27 @@ const ConfirmMappingPanel = ({ result, onPluginConfirmed }) => {
   const fieldTypes = structure.data_types || [];
   const candidateMappings = result.candidate_mappings || {};
 
-  const fieldMappings = {};
-  let idx = 0;
-  Object.entries(candidateMappings).forEach(([fieldKey, info]) => {
-    if (info.mapped_to) {
-      fieldMappings[String(idx)] = info.mapped_to;
-    }
-    idx++;
-  });
+  // Build initial mappings from candidate_mappings
+  const getInitialMappings = () => {
+    const init = {};
+    Object.entries(candidateMappings).forEach(([fieldKey, info]) => {
+      init[fieldKey] = info.mapped_to || '';
+    });
+    return init;
+  };
+
+  const [userMappings, setUserMappings] = useState(getInitialMappings);
+
+  useEffect(() => {
+    setUserMappings(getInitialMappings());
+  }, [result]);
+
+  const handleMappingChange = (fieldKey, selectedTarget) => {
+    setUserMappings(prev => ({
+      ...prev,
+      [fieldKey]: selectedTarget
+    }));
+  };
 
   const handleConfirm = async () => {
     setConfirming(true);
@@ -53,7 +104,16 @@ const ConfirmMappingPanel = ({ result, onPluginConfirmed }) => {
         prefix_pattern: prefixPattern,
         field_types: fieldTypes 
       };
-      const res = await confirmPlugin(pluginName, signature, fieldMappings);
+
+      // Build final field_mappings using user's explicit selections
+      const finalFieldMappings = {};
+      Object.entries(userMappings).forEach(([fieldKey, targetField]) => {
+        if (targetField && targetField.trim()) {
+          finalFieldMappings[fieldKey] = targetField.trim();
+        }
+      });
+
+      const res = await confirmPlugin(pluginName, signature, finalFieldMappings);
       if (res.status === 'success') {
         setConfirmed(true);
         if (onPluginConfirmed) onPluginConfirmed(res.plugin);
@@ -73,7 +133,7 @@ const ConfirmMappingPanel = ({ result, onPluginConfirmed }) => {
         <CheckSquare className="w-6 h-6 text-green-600 flex-shrink-0" />
         <div>
           <div className="font-bold">Plugin Created Successfully</div>
-          <div className="text-sm">Future events matching this structure will be parsed automatically.</div>
+          <div className="text-sm">Future events matching this structure will be parsed automatically without Groq API calls.</div>
         </div>
       </div>
     );
@@ -81,10 +141,35 @@ const ConfirmMappingPanel = ({ result, onPluginConfirmed }) => {
 
   return (
     <div className="mt-4 bg-indigo-50 border border-indigo-200 rounded-xl p-5">
-      <h4 className="font-bold text-indigo-900 mb-3 flex items-center gap-2">
-        <Puzzle className="w-5 h-5" />
-        Create Plugin from This Format
-      </h4>
+      <div className="flex justify-between items-start mb-3">
+        <div>
+          <h4 className="font-bold text-indigo-900 flex items-center gap-2 text-base">
+            <Sparkles className="w-5 h-5 text-violet-600" />
+            AI Schema Discovery
+          </h4>
+          <p className="text-xs text-indigo-700 mt-1">
+            {result?.ai_status === 'fallback' || structure.structure_source === 'regex'
+              ? 'AI mapping unavailable — fallback structure analysis used. Review and define field mappings manually.'
+              : 'AI Suggested Mapping — Review and modify the suggested mappings before creating the plugin.'}
+          </p>
+        </div>
+        <div className="flex flex-col items-end gap-1">
+          {structure.structure_source === 'groq' || result?.ai_status === 'success' ? (
+            <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+              <Zap className="w-3 h-3 text-emerald-600" /> AI Discovered (Groq)
+            </span>
+          ) : (
+            <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+              Regex Fallback
+            </span>
+          )}
+          {result?.confidence?.mapping && (
+            <span className="text-[11px] font-medium text-indigo-600">
+              Confidence: {(result.confidence.mapping * 100).toFixed(1)}%
+            </span>
+          )}
+        </div>
+      </div>
 
       <div className="mb-4">
         <label className="block text-sm font-medium text-slate-700 mb-1">Plugin Name</label>
@@ -93,36 +178,46 @@ const ConfirmMappingPanel = ({ result, onPluginConfirmed }) => {
           value={pluginName}
           onChange={e => setPluginName(e.target.value)}
           className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-400 bg-white"
+          placeholder="e.g. Custom Firewall Log Plugin"
         />
       </div>
 
-      <div className="mb-4 text-sm text-slate-600 space-y-1">
-        <div><span className="font-semibold">Format Type:</span> <code className="bg-white px-2 py-0.5 rounded border border-slate-200">{formatType}</code></div>
-        <div><span className="font-semibold">Delimiter:</span> <code className="bg-white px-2 py-0.5 rounded border border-slate-200">{delimiter === null ? 'None (Positional/Custom)' : delimiter === '\t' ? '\\t (tab)' : delimiter}</code></div>
-        <div><span className="font-semibold">Fields:</span> {fieldCount}</div>
-        {formatType === 'multiline_bracketed' && <div><span className="font-semibold">Lines:</span> {lineCount}</div>}
+      <div className="mb-4 text-xs text-slate-600 flex flex-wrap gap-4 bg-white p-2.5 rounded-lg border border-slate-200">
+        <div><span className="font-semibold text-slate-700">Format:</span> <code className="bg-slate-100 px-1.5 py-0.5 rounded">{formatType}</code></div>
+        <div><span className="font-semibold text-slate-700">Delimiter:</span> <code className="bg-slate-100 px-1.5 py-0.5 rounded">{delimiter === null ? 'None' : delimiter === '\t' ? '\\t (tab)' : delimiter}</code></div>
+        <div><span className="font-semibold text-slate-700">Field Count:</span> {fieldCount}</div>
       </div>
 
       <div className="mb-4">
-        <div className="text-sm font-semibold text-slate-700 mb-2">Confirmed Field Mappings:</div>
+        <div className="text-sm font-semibold text-slate-700 mb-2">Editable Field Mappings:</div>
         <div className="bg-white rounded-lg border border-slate-200 overflow-hidden text-sm">
-          <table className="w-full">
+          <table className="w-full text-left">
             <thead>
               <tr className="bg-slate-50 text-slate-500 border-b border-slate-200">
-                <th className="text-left px-3 py-2">Index</th>
-                <th className="text-left px-3 py-2">Field Value</th>
-                <th className="text-left px-3 py-2">Maps To</th>
+                <th className="px-3 py-2">Source Field</th>
+                <th className="px-3 py-2">Sample Value</th>
+                <th className="px-3 py-2">Target Universal Schema Field</th>
               </tr>
             </thead>
             <tbody>
               {Object.entries(candidateMappings).map(([fieldKey, info], i) => (
-                <tr key={i} className="border-b border-slate-100 last:border-0">
-                  <td className="px-3 py-2 text-slate-500 font-mono">{i}</td>
-                  <td className="px-3 py-2 font-mono">{info.value}</td>
+                <tr key={i} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                  <td className="px-3 py-2 font-mono text-slate-600">{fieldKey}</td>
+                  <td className="px-3 py-2 font-mono text-slate-800 max-w-[200px] truncate" title={info.value}>{info.value}</td>
                   <td className="px-3 py-2">
-                    {info.mapped_to
-                      ? <span className="text-indigo-600 font-semibold">{info.mapped_to}</span>
-                      : <span className="text-slate-400 italic">unmapped</span>}
+                    <select
+                      value={userMappings[fieldKey] || ''}
+                      onChange={e => handleMappingChange(fieldKey, e.target.value)}
+                      className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm bg-white font-mono text-indigo-700 font-semibold focus:ring-2 focus:ring-indigo-400 cursor-pointer"
+                    >
+                      <option value="">-- Unmapped (Ignore) --</option>
+                      {CANONICAL_TARGET_FIELDS.map(tf => (
+                        <option key={tf} value={tf}>{tf}</option>
+                      ))}
+                    </select>
+                    {info.ai_reason && (
+                      <div className="text-xs text-slate-400 mt-0.5 italic">{info.ai_reason}</div>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -137,18 +232,24 @@ const ConfirmMappingPanel = ({ result, onPluginConfirmed }) => {
 
       <div className="flex gap-3">
         <button
+          type="button"
           onClick={handleConfirm}
           disabled={confirming || !pluginName.trim()}
           className="flex items-center gap-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-semibold rounded-lg text-sm transition-colors"
         >
           {confirming ? (
-            <><span className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" /><span>Saving...</span></>
+            <><span className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" /><span>Saving Plugin...</span></>
           ) : (
-            <><CheckSquare className="w-4 h-4" /><span>Confirm Mapping</span></>
+            <><CheckSquare className="w-4 h-4" /><span>Create Plugin From Mapping</span></>
           )}
         </button>
-        <button className="px-5 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm hover:bg-slate-50 transition-colors">
-          Reject / Review
+        <button
+          type="button"
+          onClick={() => setUserMappings(getInitialMappings())}
+          className="flex items-center gap-1.5 px-4 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm hover:bg-slate-100 transition-colors"
+        >
+          <RotateCcw className="w-4 h-4" />
+          <span>Reset AI Mapping</span>
         </button>
       </div>
     </div>
@@ -165,7 +266,6 @@ const ResultView = ({ result, onPluginConfirmed }) => {
         <h3 className="text-lg font-semibold text-orange-800">Endpoint Not Implemented</h3>
         <p className="text-sm text-orange-600 mt-2">
           The backend API returned a "not implemented" status.
-          To see the full pipeline, please implement the parsing and normalization logic in the Python backend.
         </p>
       </div>
     );
@@ -401,7 +501,7 @@ const ResultView = ({ result, onPluginConfirmed }) => {
         </div>
       </div>
 
-      {/* Unknown Format — Adaptive Intelligence + Confirm Mapping */}
+      {/* Unknown Format — Adaptive Intelligence + Editable Confirm Mapping */}
       {isUnknown && result?.confidence && (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
           <div className="p-6 border-b border-slate-100 bg-indigo-50">
@@ -421,78 +521,6 @@ const ResultView = ({ result, onPluginConfirmed }) => {
             </h3>
           </div>
           <div className="p-6">
-            <div className="mb-4">
-              <span className="font-semibold text-slate-700">Confidence Score:</span>{' '}
-              {(result.confidence.mapping * 100).toFixed(1)}%
-            </div>
-
-            <h4 className="font-semibold text-slate-700 mb-2">Candidate Field Mappings</h4>
-            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 font-mono text-sm overflow-x-auto">
-              <table className="w-full text-left">
-                <thead>
-                  <tr className="text-slate-500 border-b border-slate-200">
-                    <th className="pb-2">Field</th>
-                    <th className="pb-2">Value</th>
-                    <th className="pb-2">Mapped To</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(result.candidate_mappings || {}).map(([key, info], i) => (
-                    <React.Fragment key={i}>
-                      <tr className="border-b border-slate-100 last:border-0">
-                        <td className="py-2 text-slate-600">{key}</td>
-                        <td className="py-2">{info.value}</td>
-                        <td className="py-2">
-                          <div className="flex items-center gap-2">
-                            {info.mapped_to
-                              ? <span className="text-indigo-600 font-semibold">→ {info.mapped_to}</span>
-                              : <span className="text-slate-400 italic">unmapped</span>}
-                            {info.source === 'ai' && (
-                              <span className="text-xs bg-violet-100 text-violet-700 border border-violet-200 px-1.5 py-0.5 rounded-full font-semibold">AI</span>
-                            )}
-                            {info.source === 'ai+local' && (
-                              <span className="text-xs bg-green-100 text-green-700 border border-green-200 px-1.5 py-0.5 rounded-full font-semibold">AI+Local</span>
-                            )}
-                            {info.source === 'local' && (
-                              <span className="text-xs bg-slate-100 text-slate-500 border border-slate-200 px-1.5 py-0.5 rounded-full">Local</span>
-                            )}
-                          </div>
-                          {info.ai_reason && (
-                            <div className="text-xs text-slate-400 mt-0.5 italic">{info.ai_reason}</div>
-                          )}
-                        </td>
-                      </tr>
-                      {/* Conflict candidates: render sub-rows for human to choose */}
-                      {info.conflict_candidates && info.conflict_candidates.map((cand, ci) => (
-                        <tr key={`conflict-${i}-${ci}`} className="bg-amber-50 border-b border-amber-100 last:border-0">
-                          <td className="pl-6 py-1 text-xs text-amber-700 font-mono">↳ conflict #{ci + 1}</td>
-                          <td className="py-1 text-xs text-slate-500">{info.value}</td>
-                          <td className="py-1">
-                            <div className="flex items-center gap-2">
-                              <span className="text-amber-700 font-semibold text-xs">→ {cand.target_field}</span>
-                              <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold border ${
-                                cand.source === 'ai'
-                                  ? 'bg-violet-100 text-violet-700 border-violet-200'
-                                  : 'bg-slate-100 text-slate-500 border-slate-200'
-                              }`}>{cand.source === 'ai' ? 'AI' : 'Local'}</span>
-                              <span className="text-xs text-slate-400">{(cand.confidence * 100).toFixed(0)}%</span>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </React.Fragment>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {result.confidence.human_review_required && (
-              <div className="mt-4 flex items-center space-x-2 text-orange-600 bg-orange-50 p-3 rounded-lg border border-orange-200">
-                <AlertTriangle className="w-5 h-5" />
-                <span className="text-sm font-medium">⚠ Human Review Recommended due to low confidence or unmapped fields.</span>
-              </div>
-            )}
-
             <ConfirmMappingPanel result={result} onPluginConfirmed={onPluginConfirmed} />
           </div>
         </div>
@@ -504,7 +532,7 @@ const ResultView = ({ result, onPluginConfirmed }) => {
           <Puzzle className="w-8 h-8 text-purple-500 flex-shrink-0" />
           <div>
             <div className="font-bold text-purple-900">Custom Plugin Recognized</div>
-            <div className="text-sm text-purple-700">This event matched a stored plugin: <strong>{result.parser}</strong>. Processed automatically without human intervention.</div>
+            <div className="text-sm text-purple-700">This event matched a stored plugin: <strong>{result.parser}</strong>. Processed automatically without Groq API calls.</div>
           </div>
         </div>
       )}

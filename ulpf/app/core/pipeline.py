@@ -1,5 +1,5 @@
 import traceback
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from app.models.input_event import InputEvent
 from app.models.processing_result import ProcessingResult
@@ -15,7 +15,7 @@ from app.trust.validator import validate_event
 from app.trust.provenance import track_provenance
 from app.trust.quarantine import handle_error
 
-from app.config import AI_MAPPING_ENABLED, AI_MAPPING_THRESHOLD
+from app.config import AI_MAPPING_ENABLED, AI_MAPPING_THRESHOLD, DB_ENABLED
 from app.services.ai.groq_provider import groq_provider
 from app.services.ai.merger import merge_mappings
 from app.services.ai.groq_provider import VALID_TARGET_FIELDS
@@ -23,7 +23,7 @@ from app.core.ocsf.mapper import map_to_ocsf
 from app.core.ocsf.validator import validate_ocsf
 
 
-def process_event(event: InputEvent) -> ProcessingResult:
+def process_event(event: InputEvent, db: Any = None, ai_cache: Optional[Dict[str, Any]] = None) -> ProcessingResult:
     raw_payload = event.raw_payload
     
     try:
@@ -42,10 +42,10 @@ def process_event(event: InputEvent) -> ProcessingResult:
         
         parser_name = None
         if detected_format != "UNKNOWN":
-            # 2a. Known Format Processing
+            # 2a. Known Format Processing (CEF, Syslog, LEEF, JSON, CSV, or Stored Custom Plugins)
             parser = format_info.get("parser")
             if parser:
-                parser_name = format_info.get("parser_name", parser.__name__)
+                parser_name = format_info.get("parser_name", parser.__name__ if hasattr(parser, '__name__') else "PluginParser")
                 parsed_data = parser(raw_payload)
             
             # 3a. Normalization
@@ -73,20 +73,44 @@ def process_event(event: InputEvent) -> ProcessingResult:
             local_candidates = mapping_result.get("candidate_mappings", {})
             overall_local = local_confidence.get("overall", 0.0)
 
-            # 3c. AI-Assisted Mapping (only when local confidence is low)
-            if AI_MAPPING_ENABLED and overall_local < AI_MAPPING_THRESHOLD:
-                ai_response = groq_provider.suggest_mappings(
-                    raw_log=raw_payload,
-                    structure=structure,
-                    candidate_mappings=local_candidates,
-                    universal_schema=sorted(VALID_TARGET_FIELDS),
-                )
+            # 3c. AI-Assisted Mapping for UNKNOWN events
+            if AI_MAPPING_ENABLED:
+                sig_key = f"{structure.get('format_type')}_{structure.get('delimiter')}_{structure.get('fields')}"
+                ai_response = None
+                if ai_cache is not None and sig_key in ai_cache:
+                    ai_response = ai_cache[sig_key]
+                else:
+                    ai_response = groq_provider.suggest_mappings(
+                        raw_log=raw_payload,
+                        structure=structure,
+                        candidate_mappings=local_candidates,
+                        universal_schema=sorted(VALID_TARGET_FIELDS),
+                    )
+                    if ai_cache is not None and ai_response is not None:
+                        ai_cache[sig_key] = ai_response
+
                 if ai_response is not None:
                     merged = merge_mappings(local_candidates, ai_response)
                     mapping_result["candidate_mappings"] = merged
                     ai_used = True
                     ai_status = "success"
-                    # Recalculate human_review flag based on merged confidence
+                    if isinstance(structure, dict):
+                        structure["structure_source"] = "groq"
+                        if ai_response.delimiter:
+                            structure["delimiter"] = ai_response.delimiter
+
+                    # Re-normalize using AI proposed mappings
+                    parsed_ai_data = {}
+                    tokens = structure.get("tokens", {})
+                    for f_name, info in merged.items():
+                        t_field = info.get("mapped_to")
+                        val = info.get("value") or tokens.get(f_name)
+                        if t_field and val is not None:
+                            parsed_ai_data[t_field] = val
+
+                    if parsed_ai_data:
+                        normalized_event, unmapped_fields = normalize_event(parsed_ai_data)
+
                     merged_scores = [
                         v["confidence"] for v in merged.values() if v.get("mapped_to")
                     ]
@@ -96,10 +120,16 @@ def process_event(event: InputEvent) -> ProcessingResult:
                 else:
                     ai_used = False
                     ai_status = "unavailable"
+                    if isinstance(structure, dict):
+                        structure["structure_source"] = "regex"
             elif AI_MAPPING_ENABLED and overall_local >= AI_MAPPING_THRESHOLD:
                 ai_status = "skipped"   # local confidence was good enough
+                if isinstance(structure, dict):
+                    structure["structure_source"] = "regex"
             else:
                 ai_status = "not_applicable"   # AI disabled in config
+                if isinstance(structure, dict):
+                    structure["structure_source"] = "regex"
 
         # 4. Provenance / Traceability
         provenance = track_provenance(parsed_data, normalized_event)
@@ -115,11 +145,7 @@ def process_event(event: InputEvent) -> ProcessingResult:
         ocsf_event, final_unmapped_fields = map_to_ocsf(normalized_event, unmapped_fields)
         ocsf_validation_result = validate_ocsf(ocsf_event)
 
-        # Always return a full result with ocsf_validation populated.
-        # OCSF validation failures are surfaced via ocsf_validation.status == "INVALID".
-        # This preserves the raw event, provenance and all context (lossless).
-        # Only unrecoverable exceptions (caught below) use handle_error / quarantine.
-        return ProcessingResult(
+        result = ProcessingResult(
             raw_event=raw_payload,
             source_file=event.source_file,
             source_file_index=event.source_file_index,
@@ -137,9 +163,26 @@ def process_event(event: InputEvent) -> ProcessingResult:
             ocsf=ocsf_event,
             ocsf_validation=ocsf_validation_result
         )
+
+        # 7. Database Persistence
+        if db is not None or DB_ENABLED:
+            if db is not None:
+                from app.database.repository import save_event
+                save_event(db, result)
+            else:
+                from app.database.connection import is_db_available, get_engine
+                if is_db_available():
+                    from sqlalchemy.orm import Session
+                    engine = get_engine()
+                    if engine:
+                        with Session(engine) as session:
+                            from app.database.repository import save_event
+                            save_event(session, result)
+
+        return result
         
     except Exception as e:
         err_res = handle_error(raw_payload, str(e), traceback.format_exc())
         err_res.source_file = event.source_file
         err_res.source_file_index = event.source_file_index
-
+        return err_res

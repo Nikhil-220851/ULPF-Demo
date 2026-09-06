@@ -3,6 +3,9 @@ Centralized configuration for the ULPF application.
 All environment variables are loaded here. Never import os.getenv directly in other modules.
 """
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ── Groq API ────────────────────────────────────────────────────────────────────
 # Obtain your key at https://console.groq.com
@@ -20,3 +23,10 @@ AI_MAPPING_THRESHOLD: float = float(os.getenv("AI_MAPPING_THRESHOLD", "0.75"))
 
 # HTTP timeout in seconds for Groq API requests.
 AI_REQUEST_TIMEOUT: int = int(os.getenv("AI_REQUEST_TIMEOUT", "30"))
+
+# ── Database Configuration ──────────────────────────────────────────────────────
+DATABASE_URL: str = os.getenv("DATABASE_URL", "")
+
+# Set to "false" to run without PostgreSQL (pipeline still works; events not persisted).
+# Re-enable by setting DB_ENABLED=true (and providing a valid DATABASE_URL).
+DB_ENABLED: bool = os.getenv("DB_ENABLED", "true").lower() == "true"

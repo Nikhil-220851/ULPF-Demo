@@ -62,4 +62,24 @@ export const getPlugins = async () => {
   }
 };
 
+export const deletePlugin = async (pluginId) => {
+  try {
+    const response = await apiClient.delete(`/plugins/${pluginId}`);
+    return response.data;
+  } catch (error) {
+    console.error("Delete plugin failed", error);
+    throw error;
+  }
+};
+
+export const updatePlugin = async (pluginId, updateData) => {
+  try {
+    const response = await apiClient.put(`/plugins/${pluginId}`, updateData);
+    return response.data;
+  } catch (error) {
+    console.error("Update plugin failed", error);
+    throw error;
+  }
+};
+
 export default apiClient;

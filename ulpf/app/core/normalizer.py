@@ -1,4 +1,4 @@
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 from datetime import datetime
 import re
 from app.models.universal_event import UniversalEvent
@@ -20,6 +20,7 @@ FIELD_MAPPINGS = {
     "clientaddress": ("source", "ip"),
     "origin_ip": ("source", "ip"),
     "originip": ("source", "ip"),
+    "source.endpoint": ("source", "ip"),
 
     # Destination IP
     "dst": ("destination", "ip"),
@@ -34,6 +35,7 @@ FIELD_MAPPINGS = {
     "destip": ("destination", "ip"),
     "server_ip": ("destination", "ip"),
     "serverip": ("destination", "ip"),
+    "destination.endpoint": ("destination", "ip"),
 
     # Source Port
     "src_port": ("source", "port"),
@@ -74,7 +76,7 @@ FIELD_MAPPINGS = {
     "account_name": ("user", "name"),
     "login": ("user", "name"),
     "login_user": ("user", "name"),
-    "duser": ("user", "name"), # CEF destination user
+    "duser": ("user", "name"),
 
     # Message / Description
     "msg": ("event", "message"),
@@ -156,13 +158,6 @@ FIELD_MAPPINGS = {
     "file_path": ("event", "path"),
     "filepath": ("event", "path"),
 
-    # Country / Location
-    "country": ("source", "country"),
-    "country_code": ("source", "country"),
-    "countrycode": ("source", "country"),
-    "geo_country": ("source", "country"),
-    "geocountry": ("source", "country"),
-
     # Bytes / Network Size
     "bytes": ("network", "bytes"),
     "byte_count": ("network", "bytes"),
@@ -173,39 +168,54 @@ FIELD_MAPPINGS = {
     "bytesreceived": ("network", "bytes_received")
 }
 
-# The universal schema categories we support dynamically constructing
 UNIVERSAL_CATEGORIES = {"event", "source", "destination", "network", "user", "device"}
 
+IPV4_REGEX = re.compile(r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
+
+def _is_ip(val: str) -> bool:
+    return bool(isinstance(val, str) and IPV4_REGEX.match(val.strip()))
+
+def _parse_composite_endpoint(val: Any) -> Tuple[Optional[str], Optional[int]]:
+    """Extract (ip, port) from composite values like 192.168.44.27#51542 or 10.20.30.40:443."""
+    if not isinstance(val, str):
+        return None, None
+    s = val.strip()
+    delimiter = "#" if "#" in s else (":" if ":" in s else None)
+    if delimiter:
+        parts = s.split(delimiter, 1)
+        if len(parts) == 2 and _is_ip(parts[0]) and parts[1].isdigit():
+            return parts[0], int(parts[1])
+    elif _is_ip(s):
+        return s, None
+    return None, None
+
 def try_convert_port(value: Any) -> Any:
-    """Attempts to convert port to integer safely. Returns original value if it fails."""
     try:
         return int(value)
     except (ValueError, TypeError):
         return value
 
 def normalize_protocol(value: Any) -> Any:
-    """Normalizes protocol strings (e.g. TCP -> tcp)."""
     if isinstance(value, str):
         return value.lower()
     return value
 
 def try_convert_timestamp(value: Any) -> Any:
-    """Attempts to convert common timestamp formats to ISO-8601. Returns original on failure."""
     if not isinstance(value, str):
         return value
     
-    # Very basic parsing attempts for common formats
     formats_to_try = [
         "%Y-%m-%d %H:%M:%S",
         "%Y-%m-%dT%H:%M:%S",
         "%Y/%m/%d %H:%M:%S",
-        "%b %d %H:%M:%S" # Syslog format
+        "%Y-%m-%d",
+        "%Y/%m/%d",
+        "%b %d %H:%M:%S"
     ]
     
     for fmt in formats_to_try:
         try:
             parsed = datetime.strptime(value.strip(), fmt)
-            # If syslog format, inject current year
             if fmt == "%b %d %H:%M:%S":
                 parsed = parsed.replace(year=datetime.now().year)
             return parsed.isoformat()
@@ -217,6 +227,7 @@ def try_convert_timestamp(value: Any) -> Any:
 def normalize_event(parsed_data: Dict[str, Any]) -> Tuple[UniversalEvent, Dict[str, Any]]:
     """
     Normalizes parsed log fields into the ULPF UniversalEvent schema.
+    Supports composite values (IP#PORT) and composite date/time tokens.
     Returns a tuple of (normalized_event, unmapped_fields)
     """
     normalized_data = {
@@ -230,16 +241,24 @@ def normalize_event(parsed_data: Dict[str, Any]) -> Tuple[UniversalEvent, Dict[s
     severity = None
     unmapped_fields = {}
 
-    # Track fields we've already set to avoid overwriting with lower-priority aliases
-    # We track by f"{category}.{subfield}"
     populated_paths = set()
 
     def set_field(category: str, subfield: str, val: Any, orig_key: str):
         path = f"{category}.{subfield}" if subfield else category
         if path in populated_paths:
-            # Deterministic conflict handling: Push conflicting duplicate to unmapped
             unmapped_fields[orig_key] = val
             return
+
+        # Check composite IP#PORT or IP:PORT
+        if category in ("source", "destination") and subfield in ("ip", "endpoint", "port"):
+            ip_part, port_part = _parse_composite_endpoint(val)
+            if ip_part:
+                normalized_data[category]["ip"] = ip_part
+                populated_paths.add(f"{category}.ip")
+                if port_part is not None:
+                    normalized_data[category]["port"] = port_part
+                    populated_paths.add(f"{category}.port")
+                return
 
         # Type Conversions
         if category in ("source", "destination") and subfield == "port":
@@ -256,13 +275,11 @@ def normalize_event(parsed_data: Dict[str, Any]) -> Tuple[UniversalEvent, Dict[s
             if subfield is not None:
                 normalized_data[category][subfield] = val
             else:
-                unmapped_fields[orig_key] = val # should not happen via mappings
+                unmapped_fields[orig_key] = val
         else:
             unmapped_fields[orig_key] = val
         populated_paths.add(path)
 
-    # We do a two-pass mapping to ensure plugin/exact matches take priority
-    
     # Pass 1: Exact matches (like "source.ip" provided by plugin or unknown-log mapper)
     remaining_fields = {}
     for key, value in parsed_data.items():
@@ -282,8 +299,23 @@ def normalize_event(parsed_data: Dict[str, Any]) -> Tuple[UniversalEvent, Dict[s
             cat, sub = FIELD_MAPPINGS[lower_key]
             set_field(cat, sub, value, orig_key=key)
         else:
-            # Unmapped
             unmapped_fields[key] = value
+
+    # Composite Timestamp Pairing Check:
+    # If date and time exist in separate tokens, combine them into event.timestamp
+    if "timestamp" not in normalized_data["event"]:
+        date_val = None
+        time_val = None
+        for k, v in list(unmapped_fields.items()):
+            if isinstance(v, str):
+                v_strip = v.strip()
+                if not date_val and re.match(r"^\d{4}[-/]\d{2}[-/]\d{2}$", v_strip):
+                    date_val = v_strip
+                elif not time_val and re.match(r"^\d{2}:\d{2}:\d{2}(?:\.\d+)?$", v_strip):
+                    time_val = v_strip
+        if date_val:
+            combined_ts = f"{date_val} {time_val}" if time_val else date_val
+            normalized_data["event"]["timestamp"] = try_convert_timestamp(combined_ts)
 
     event = UniversalEvent(
         event=normalized_data.get("event"),

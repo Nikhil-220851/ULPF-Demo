@@ -43,6 +43,18 @@ class PluginManager:
             print(f"Failed to save plugin {plugin_def.get('plugin_id')}: {e}")
             return False
 
+    def delete_plugin(self, plugin_id: str) -> bool:
+        try:
+            if plugin_id in self.plugins:
+                del self.plugins[plugin_id]
+            filepath = os.path.join(PLUGINS_DIR, f"{plugin_id}.json")
+            if os.path.exists(filepath):
+                os.remove(filepath)
+            return True
+        except Exception as e:
+            print(f"Failed to delete plugin {plugin_id}: {e}")
+            return False
+
     def get_all_plugins(self) -> List[dict]:
         return list(self.plugins.values())
 

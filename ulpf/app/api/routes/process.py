@@ -12,19 +12,18 @@ async def process_log(event: InputEvent):
 @router.post("/process/batch", response_model=BatchProcessingResult)
 async def process_batch(batch: BatchInput):
     results = []
+    ai_cache = {}
     for evt in batch.events:
         if isinstance(evt, str):
             if evt.strip():
-                results.append(process_event(InputEvent(raw_payload=evt)))
+                results.append(process_event(InputEvent(raw_payload=evt), ai_cache=ai_cache))
         elif isinstance(evt, InputEvent):
             if evt.raw_payload.strip():
-                results.append(process_event(evt))
+                results.append(process_event(evt, ai_cache=ai_cache))
         else:
-            # Handle if FastAPI parses it as dict instead of InputEvent
-            # Due to Union, pydantic might parse it as a dict in older versions, but normally it should be InputEvent
             raw = getattr(evt, "raw_payload", None) or (evt.get("raw_payload") if isinstance(evt, dict) else None)
             if raw and raw.strip():
-                results.append(process_event(InputEvent(**(evt if isinstance(evt, dict) else evt.dict()))))
+                results.append(process_event(InputEvent(**(evt if isinstance(evt, dict) else evt.dict())), ai_cache=ai_cache))
             
     return BatchProcessingResult(
         total=len(batch.events),

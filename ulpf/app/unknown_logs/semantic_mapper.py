@@ -58,14 +58,14 @@ def map_semantics(structure: dict) -> dict:
             _set_nested(normalized_event, mapped_to, value)
 
         # --- Type-based positional mapping ---
-        elif token_type == "IP":
+        elif token_type in ("IP", "COMPOSITE_ENDPOINT"):
             if ip_count == 0:
                 mapped_to = "source.ip"
-                confidence_score = 0.90
+                confidence_score = 0.94 if token_type == "COMPOSITE_ENDPOINT" else 0.90
                 normalized_event.source["ip"] = value
             elif ip_count == 1:
                 mapped_to = "destination.ip"
-                confidence_score = 0.88
+                confidence_score = 0.92 if token_type == "COMPOSITE_ENDPOINT" else 0.88
                 normalized_event.destination["ip"] = value
             else:
                 unmapped_fields[field_name] = value
@@ -88,6 +88,11 @@ def map_semantics(structure: dict) -> dict:
             else:
                 unmapped_fields[field_name] = value
             port_count += 1
+
+        elif token_type == "PROTOCOL":
+            mapped_to = "network.transport"
+            confidence_score = 0.90
+            normalized_event.network["transport"] = value
 
         elif token_type == "ACTION":
             mapped_to = "event.action"
